@@ -1,0 +1,165 @@
+---
+title: "Impact of Severe Weather Events on Population Health and Economic Consequences in the US"
+author: "Jefferson Ramirez"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    keep_md: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
+```
+
+## Synopsis
+
+This report analyzes the NOAA storm database (1950-2011) to identify which 
+weather events are most harmful to public health and which have the greatest economic 
+consequences. The analysis begins by loading the original compressed file and transforming
+ the economic damage variables (PROPDMG and CROPDMG) into numeric values. Total health impacts
+  (sum of fatalities and injuries) and economic impacts (sum of property and crop damage) are
+   calculated for each event type (EVTYPE). Results are presented using tables and plots, showing 
+   that tornadoes are the most harmful event for health, while floods cause the greatest economic 
+   impact. These findings can help prioritize resources for disaster preparedness.
+
+## Data Processing
+
+### Loading libraries and downloading data
+
+```{r load-data}
+# Load required libraries
+library(dplyr)
+library(ggplot2)
+
+# Define URL and destination file
+fileUrl <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+destFile <- "repdata_data_StormData.csv.bz2"
+
+# Download if not exists
+if (!file.exists(destFile)) {
+  download.file(fileUrl, destfile = destFile, method = "auto", mode = "wb")
+}
+
+# Read data
+storm_data <- read.csv(destFile, stringsAsFactors = FALSE)
+
+# Explore structure
+dim(storm_data)
+names(storm_data)
+head(storm_data, 3)
+```
+
+### Data transformation
+
+The database uses single-letter codes for damage magnitudes (e.g., "K" for
+ thousands, "M" for millions, "B" for billions). We transform these columns 
+ into numeric values to calculate total damages in dollars.
+
+```{r data-transformation}
+# Function to convert exponent codes to numeric multipliers
+exp_to_multiplier <- function(exp_code) {
+  exp_code <- toupper(trimws(as.character(exp_code)))
+  mult <- rep(1, length(exp_code))
+  mult[exp_code == "H"] <- 1e2
+  mult[exp_code == "K"] <- 1e3
+  mult[exp_code == "M"] <- 1e6
+  mult[exp_code == "B"] <- 1e9
+  is_digit <- grepl("^[0-9]$", exp_code)
+  mult[is_digit] <- 10^as.numeric(exp_code[is_digit])
+  return(mult)
+}
+
+# Create clean dataframe
+storm_clean <- storm_data %>%
+  transmute(
+    EVTYPE = toupper(trimws(EVTYPE)),
+    FATALITIES = as.numeric(FATALITIES),
+    INJURIES = as.numeric(INJURIES),
+    PROPDMG = as.numeric(PROPDMG),
+    PROPDMGEXP = as.character(PROPDMGEXP),
+    CROPDMG = as.numeric(CROPDMG),
+    CROPDMGEXP = as.character(CROPDMGEXP)
+  ) %>%
+  mutate(
+    health_impact = FATALITIES + INJURIES,
+    property_damage = PROPDMG * exp_to_multiplier(PROPDMGEXP),
+    crop_damage = CROPDMG * exp_to_multiplier(CROPDMGEXP),
+    economic_impact = property_damage + crop_damage
+  )
+
+str(storm_clean)
+```
+
+## Results
+
+### 1. Which types of events are most harmful to population health?
+
+```{r health-impact}
+health_impact <- storm_clean %>%
+  group_by(EVTYPE) %>%
+  summarise(
+    total_fatalities = sum(FATALITIES, na.rm = TRUE),
+    total_injuries = sum(INJURIES, na.rm = TRUE),
+    total_health_impact = sum(health_impact, na.rm = TRUE)
+  ) %>%
+  arrange(desc(total_health_impact))
+
+head(health_impact, 10)
+```
+
+**Figure 1: Top 10 most harmful events for health.**
+
+```{r plot-health, fig.cap="Top 10 most harmful events for health in the US (Fatalities + Injuries)"}
+top_health <- head(health_impact, 10)
+
+ggplot(top_health, aes(x = reorder(EVTYPE, total_health_impact),
+                       y = total_health_impact)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Top 10 Most Harmful Events for Population Health",
+    x = "Event Type",
+    y = "Total Health Impact (Fatalities + Injuries)"
+  ) +
+  theme_minimal()
+```
+
+### 2. Which types of events have the greatest economic consequences?
+
+```{r economic-impact}
+economic_impact <- storm_clean %>%
+  group_by(EVTYPE) %>%
+  summarise(
+    total_property_damage = sum(property_damage, na.rm = TRUE),
+    total_crop_damage = sum(crop_damage, na.rm = TRUE),
+    total_economic_impact = sum(economic_impact, na.rm = TRUE)
+  ) %>%
+  arrange(desc(total_economic_impact))
+
+head(economic_impact, 10)
+```
+
+**Figure 2: Top 10 events with the greatest economic impact.**
+
+```{r plot-economic, fig.cap="Top 10 events with the greatest economic impact in the US (Property and Crop Damages)"}
+top_economic <- head(economic_impact, 10)
+
+ggplot(top_economic, aes(x = reorder(EVTYPE, total_economic_impact),
+                         y = total_economic_impact / 1e9)) +
+  geom_bar(stat = "identity", fill = "darkgreen") +
+  coord_flip() +
+  labs(
+    title = "Top 10 Events with the Greatest Economic Impact",
+    x = "Event Type",
+    y = "Total Economic Impact (Billions of USD)"
+  ) +
+  theme_minimal()
+```
+
+## Conclusion
+
+The analysis of the NOAA database shows that tornadoes are by far the most harmful 
+event for public health in the United States, causing thousands of fatalities and
+ injuries between 1950 and 2011. Regarding economic impact, floods top the list, 
+ followed by hurricanes and severe storms. These results suggest that preparedness
+  and response resources should prioritize early tornado warnings and flood risk management.
